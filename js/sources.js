@@ -1,6 +1,5 @@
 /* =========================================================
-   MIP · public API source registry
-   bh-apps-fetch's own copy of MIP's registry: the scheduled jobs (jobs/upstream.mjs) pace their calls with it.
+   Public API source registry
    One list shared by the browser (js/api.js) and the dev proxy (proxy/upstream.mjs), so both apply the same
    limits and cache lifetimes. Limits sit below each source's published limit.
      rpm    requests per minute         burst  requests allowed back to back     conc  parallel requests
@@ -11,7 +10,7 @@
      accept   Accept header for sources that answer with HTML rather than JSON (default application/json)
      timeoutS give up on a call after this many seconds (default: no limit), for sources that sometimes hang
      post     the source searches by POST only: the browser asks for a GET URL whose query parameter of this name holds the
-              JSON body, and the dev proxy and the relay send that body as a POST (so answers cache by URL like any other)
+              JSON body, and the dev proxy sends that body as a POST (so answers cache by URL like any other)
    Cache lifetimes follow the refresh cadence in requirements.md, section 7.
    ========================================================= */
 (function (root) {

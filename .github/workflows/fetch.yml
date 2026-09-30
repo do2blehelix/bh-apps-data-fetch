@@ -1,29 +1,19 @@
-name: Fetch — refresh the shared data
+name: Fetch
 
-# One workflow collects the public data that MIP (bh-app-medintel) and CPP (bh-app-pharmlands.360) both show, for every
-# asset in js/catalog.js, and commits it to main. GitHub Pages serves the repo, so both apps read the same files:
-#   https://do2blehelix.github.io/bh-apps-fetch/data/<name>.js    for <script src> (MIP)
-#   https://do2blehelix.github.io/bh-apps-fetch/data/<name>.json  for fetch() (CPP)
-# The repo is public, so GitHub-hosted runners cost no Actions minutes. The limits that remain are the sources' own:
-# GDELT allows one call every 5 seconds per IP address (runners share addresses, so some calls are refused), and the
-# Gemini free tier has a daily quota per model.
+# Collects public data for every asset in js/catalog.js and commits it to data/. Each file is also written as .json.
 #
-# What runs when (UTC):
-#   hourly at :05             news headlines (GDELT) and regulator newsrooms (FDA, EMA, MHRA); no LLM
-#   01:35 07:35 13:35 19:35   the full intel job: the above plus SEC filings, web search, and Gemini tagging and reading
-#   05:30 daily               regulatory data (EMA, Orange Book) and reported revenue (SEC XBRL); keeps the schedule alive
-#   06:20 every other day     catalog review (late in the Pacific day, on the Gemini quota the day has left)
+# When (UTC):
+#   hourly at :05             news headlines and regulator newsrooms; no LLM
+#   01:35 07:35 13:35 19:35   the full intel job: the above plus SEC filings, web search, LLM tagging and reading
+#   05:30 daily               regulatory data and reported revenue; re-enables this workflow so the schedule stays on
+#   06:20 every other day     catalog review
 #   manual dispatch           choose what to run
-# After any of them, jobs/to-json.mjs writes the .json twins, and the run commits only when a file changed.
+# A run commits only when a file changed.
 #
-# Secrets (Settings > Secrets and variables > Actions):
-#   LLM_API_KEY        Gemini API key (aistudio.google.com), for tagging, reading and the catalog review    (optional)
-#   MIP_CONTACT_EMAIL  contact declared to the SEC and the polite pools; the SEC refuses calls without one  (optional)
-#   OPENFDA_API_KEY, NCBI_API_KEY, OPENALEX_API_KEY                                                  (optional)
-# Variable (optional): LLM_MODELS, a comma-separated Gemini model ladder instead of the one built from the key's list.
+# Secrets (all optional): LLM_API_KEY, MIP_CONTACT_EMAIL (required by the SEC), OPENFDA_API_KEY, NCBI_API_KEY,
+# OPENALEX_API_KEY. Variable (optional): LLM_MODELS.
 #
-# Keep this workflow on schedule and manual triggers only. A pull_request trigger in a public repo is the usual way
-# secrets leak.
+# Keep this workflow on schedule and manual triggers only: a pull_request trigger in a public repo can leak secrets.
 on:
   schedule:
     - cron: "5 * * * *"            # hourly: news and regulator feeds

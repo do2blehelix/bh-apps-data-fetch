@@ -1,4 +1,4 @@
-// MIP · Gemini client for the scheduled intel job (jobs/fetch-intel.mjs). Zero dependencies.
+// Gemini client for the scheduled intel job (jobs/fetch-intel.mjs). Zero dependencies.
 //
 // Free-tier limits are per Google Cloud project and per model: requests per minute, tokens per minute and requests per
 // day, the daily count resetting at midnight Pacific time. So every call walks a ladder of models instead of leaning on

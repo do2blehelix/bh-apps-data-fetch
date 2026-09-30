@@ -1,13 +1,11 @@
 /* =========================================================
-   MIP · therapeutic-area catalog
+   Therapeutic-area catalog
    Configuration, not data: indication names and query terms, and the public facts about each asset (INN, US brand,
    company, mechanism, development codes) that scope the live queries. Development status, labels, trials and
    literature all come from the sources at run time. The user picks a therapeutic area, a country, the indications
    and assets to watch, and their own products, in Watchlist (stored in the browser).
    One file, two callers: the browser (window.MIP_CATALOG) and proxy/refresh-snapshot.mjs (require), which builds the
    nightly snapshot for the default watchlist of one therapeutic area.
-   Canonical copy: js/catalog.js in github.com/do2blehelix/bh-apps-fetch, whose scheduled jobs watch every asset in it.
-   MIP (js/catalog.js, refreshed by its site.yml) and CPP (index.html, block 3) carry copies. Edit it there.
 
    Therapeutic area: { id, name, short, desc, fedTerms, specialties, inds, assets, guides, congresses, advocacy, themes, pros,
    endpoints, elig, gaps, pops }

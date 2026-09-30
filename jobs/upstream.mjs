@@ -1,4 +1,4 @@
-// MIP dev proxy · upstream access.
+// Upstream access for the jobs.
 // Every call to a public API made by the proxy or the snapshot job goes through upstream(): per-source token bucket
 // and parallel cap (limits from js/sources.js), daily budgets that survive restarts, Retry-After backoff on 429/503,
 // merged in-flight requests, and a disk cache kept outside the Box folder. API keys and the contact email are added
@@ -27,7 +27,7 @@ function loadEnv(file) {
   }
 }
 export const CONTACT = process.env.MIP_CONTACT_EMAIL || '';
-const UA = process.env.MIP_USER_AGENT || `MIP-dev-proxy/0.1${CONTACT ? ` (${CONTACT})` : ''}`;
+const UA = process.env.MIP_USER_AGENT || `bh-apps-fetch/1.0${CONTACT ? ` (${CONTACT})` : ''}`;
 
 const keyOf = (src) => (src.key && process.env[src.key.env]) || '';
 export function limits(src) {

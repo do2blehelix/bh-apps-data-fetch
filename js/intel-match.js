@@ -1,8 +1,7 @@
 /* =========================================================
-   MIP · shared name matching and feed parsing
-   One file, three callers: jobs/fetch-intel.mjs (the scheduled job), api/relay.js (the Vercel relay) and the browser
-   (window.MIP_MATCH), so an asset is recognised the same way in a scheduled headline and in a live one.
-   Canonical copy: js/intel-match.js in github.com/do2blehelix/bh-apps-fetch; MIP carries a copy. Edit it there.
+   Shared name matching and feed parsing
+   One file for jobs/fetch-intel.mjs (the scheduled job) and the browser (window.MIP_MATCH), so an asset is recognised
+   the same way in a scheduled headline and in a live one.
      termsOf(a)      the names that identify a catalog asset in a text: US brand (and its first word when the brand has
                      several, as headlines drop the device name), INN (not for a formulation whose molecule has other
                      products, such as ruxolitinib cream), the catalog name and short name, development codes, and a code

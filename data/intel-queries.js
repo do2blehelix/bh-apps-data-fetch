@@ -1,7 +1,5 @@
 /* =========================================================
-   MIP · intel job configuration, read by jobs/fetch-intel.mjs
-   Canonical copy: data/intel-queries.js in github.com/do2blehelix/bh-apps-fetch; MIP carries a copy for its relay and
-   dev proxy. Edit it there.
+   Intel job configuration, read by jobs/fetch-intel.mjs
    The assets and indications the job watches are not listed here: it takes every asset and indication of every
    therapeutic area in js/catalog.js (with the reviewed updates applied), and the app shows each user the records about
    their own watchlist. Names searched and matched come from each catalog entry: US brand, INN, development codes.
@@ -16,7 +14,7 @@
        region   US, EU or GB: which profile countries see it (COUNTRIES[].regions in js/app/core.js)
        kind     news or safety (safety items also show on Safety Signals)
        strip    optional pattern removed from the start of titles (feed boilerplate)
-   INTEL_HTA_AGENCIES  HTA bodies the extraction may name, with the MIP country each one belongs to (COUNTRIES in
+   INTEL_HTA_AGENCIES  HTA bodies the extraction may name, with the country each one belongs to (COUNTRIES in
                 js/app/core.js).
    Edit here; the job picks the change up on its next run.
    ========================================================= */
