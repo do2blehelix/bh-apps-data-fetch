@@ -24,7 +24,7 @@
 //          summary. Items that name an asset are read for milestones too.
 //   sec    SEC EDGAR full-text search: 8-K and 6-K press releases (EX-99 exhibits) filed by each asset's own sponsor
 //          (the catalog's sponsor pattern on the filer name), each asset once a day, oldest first. The SEC requires a
-//          declared contact, so this part runs only when MIP_CONTACT_EMAIL is set.
+//          declared contact, so this part runs only when CONTACT_EMAIL is set.
 //   web    Google Search grounding, when the key's free tier offers it (gemini-2.5-flash / flash-lite): the pages it
 //          cites for each asset's regulatory news (weekly) and for HTA decisions on marketed assets (every two weeks),
 //          oldest first. The job fetches those pages itself; the model's own answer is not used.
@@ -147,7 +147,7 @@ async function getText(url, maxAgeS = 3600) {
   return r.body;
 }
 /* Any other public page (articles and pages found by web search): one at a time, a pause between pages. */
-const PAGE_UA = `Mozilla/5.0 (compatible; bh-apps-fetch/1.0${CONTACT ? '; ' + CONTACT : ''})`;
+const PAGE_UA = `Mozilla/5.0 (compatible; bh-apps-data-fetch/1.0${CONTACT ? '; ' + CONTACT : ''})`;
 let lastPage = 0;
 async function fetchPage(url) {
   const wait = lastPage + 1500 - Date.now(); if (wait > 0) await sleep(wait); lastPage = Date.now();
@@ -348,7 +348,7 @@ async function runFeeds() {
    ========================================================= */
 const cleanCo = (s) => String(s || '').replace(/\s*\(CIK[^)]*\)\s*$/, '').replace(/\s*\([A-Z0-9.\-, ]+\)\s*$/, '').trim();
 async function runSec() {
-  if (!CONTACT) { status.sec = { source: 'SEC EDGAR full-text search', at: now.toISOString(), ok: false, error: 'Skipped: the SEC requires a declared contact. Set MIP_CONTACT_EMAIL.' }; log('sec       skipped: set MIP_CONTACT_EMAIL (the SEC requires a declared contact)'); return; }
+  if (!CONTACT) { status.sec = { source: 'SEC EDGAR full-text search', at: now.toISOString(), ok: false, error: 'Skipped: the SEC requires a declared contact. Set CONTACT_EMAIL.' }; log('sec       skipped: set CONTACT_EMAIL (the SEC requires a declared contact)'); return; }
   const all = WATCH.filter((w) => w.sponsor), list = all.filter((w) => runs.sec_at[w.asset] !== TODAY).sort((a, b) => String(runs.sec_at[a.asset] || '').localeCompare(String(runs.sec_at[b.asset] || ''))).slice(0, SEC_ASSETS);
   const stopAt = Date.now() + SEC_MAX_MIN * 60000;
   let found = 0, added = 0, failed = 0, done = 0, lastErr = null;

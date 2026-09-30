@@ -10,7 +10,7 @@ name: Fetch
 #   manual dispatch           choose what to run
 # A run commits only when a file changed.
 #
-# Secrets (all optional): LLM_API_KEY, MIP_CONTACT_EMAIL (required by the SEC), OPENFDA_API_KEY, NCBI_API_KEY,
+# Secrets (all optional): LLM_API_KEY, CONTACT_EMAIL (required by the SEC), OPENFDA_API_KEY, NCBI_API_KEY,
 # OPENALEX_API_KEY. Variable (optional): LLM_MODELS.
 #
 # Keep this workflow on schedule and manual triggers only: a pull_request trigger in a public repo can leak secrets.
@@ -91,7 +91,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         env:
-          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
         run: node jobs/fetch-intel.mjs --only=news,feeds
 
       - name: Intel (news, feeds, SEC filings, LLM tagging and reading)
@@ -101,7 +101,7 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODELS: ${{ vars.LLM_MODELS }}
-          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
           MIP_INTEL_MAX_MIN: 12
           MIP_INTEL_SEC_ASSETS: 80
           MIP_INTEL_SEC_BACKFILL_DAYS: 90
@@ -115,7 +115,7 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODELS: ${{ vars.LLM_MODELS }}
-          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
           OPENFDA_API_KEY: ${{ secrets.OPENFDA_API_KEY }}
         run: node jobs/review-catalog.mjs ${{ steps.plan.outputs.catalog_force == 'true' && '--force' || '' }}
 
@@ -125,13 +125,13 @@ jobs:
         timeout-minutes: 15
         run: node jobs/fetch-regulatory.mjs
 
-      # Each filing is read once (ledger in data/revenue.js); a run reads at most 60 new ones. Needs MIP_CONTACT_EMAIL.
+      # Each filing is read once (ledger in data/revenue.js); a run reads at most 60 new ones. Needs CONTACT_EMAIL.
       - name: Reported revenue (SEC XBRL)
         if: steps.plan.outputs.revenue == 'true'
         continue-on-error: true
         timeout-minutes: 15
         env:
-          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
         run: node jobs/fetch-revenue.mjs
 
       - name: JSON twins

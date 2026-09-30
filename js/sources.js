@@ -6,7 +6,7 @@
      day    daily cap without a key     *Keyed the same with an API key          ttlH  cache lifetime, hours
      cors   callable straight from a browser (probed 25 Sep 2026); false = dev proxy only
      key    API key the proxy adds (env variable, as a query parameter or a header)
-     contact  the proxy adds MIP_CONTACT_EMAIL for polite-pool access
+     contact  the proxy adds CONTACT_EMAIL for polite-pool access
      accept   Accept header for sources that answer with HTML rather than JSON (default application/json)
      timeoutS give up on a call after this many seconds (default: no limit), for sources that sometimes hang
      post     the source searches by POST only: the browser asks for a GET URL whose query parameter of this name holds the

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bh-apps-fetch · JSON twins of the data files, for apps that read them with fetch() rather than <script src>.
+// bh-apps-data-fetch · JSON twins of the data files, for apps that read them with fetch() rather than <script src>.
 //   node jobs/to-json.mjs
 // Each data/<name>.js (window.MIP_* or the catalog-updates wrapper) is written again as data/<name>.json, without the
 // jobs' own bookkeeping (document ledgers, queues, per-asset run times), which the apps never show. A file whose

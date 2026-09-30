@@ -26,8 +26,8 @@ function loadEnv(file) {
     if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
   }
 }
-export const CONTACT = process.env.MIP_CONTACT_EMAIL || '';
-const UA = process.env.MIP_USER_AGENT || `bh-apps-fetch/1.0${CONTACT ? ` (${CONTACT})` : ''}`;
+export const CONTACT = process.env.CONTACT_EMAIL || process.env.MIP_CONTACT_EMAIL || '';
+const UA = process.env.MIP_USER_AGENT || `bh-apps-data-fetch/1.0${CONTACT ? ` (${CONTACT})` : ''}`;
 
 const keyOf = (src) => (src.key && process.env[src.key.env]) || '';
 export function limits(src) {

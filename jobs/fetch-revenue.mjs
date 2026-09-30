@@ -5,7 +5,7 @@
 //   MIP_REVENUE_TA=IDERM                     only the companies of one therapeutic area (testing)
 // Writes data/revenue.js (window.MIP_REVENUE), which the app loads when a panel needs it.
 //
-// How it works (SEC EDGAR only; no key, but the SEC requires a declared contact, so the job needs MIP_CONTACT_EMAIL):
+// How it works (SEC EDGAR only; no key, but the SEC requires a declared contact, so the job needs CONTACT_EMAIL):
 //   1. The companies of the catalog's US brands (js/catalog.js, every area) are matched by name to SEC registrants
 //      (company_tickers.json). Companies that do not file with the SEC (private, or listed only outside the US) are listed
 //      as not matched.
@@ -57,8 +57,8 @@ function write(payload) {
   fs.renameSync(OUT + '.tmp', OUT);
 }
 if (!CONTACT) {
-  log('MIP_CONTACT_EMAIL is not set: the SEC refuses requests without a declared contact. Nothing fetched; earlier data kept.');
-  write(Object.assign({}, prev, { generated_utc: prev.generated_utc || now.toISOString(), sources: Object.assign({}, prev.sources, { sec: { ok: false, at: now.toISOString(), error: 'Skipped: MIP_CONTACT_EMAIL is not set' } }) }));
+  log('CONTACT_EMAIL is not set: the SEC refuses requests without a declared contact. Nothing fetched; earlier data kept.');
+  write(Object.assign({}, prev, { generated_utc: prev.generated_utc || now.toISOString(), sources: Object.assign({}, prev.sources, { sec: { ok: false, at: now.toISOString(), error: 'Skipped: CONTACT_EMAIL is not set' } }) }));
   process.exit(0);
 }
 
