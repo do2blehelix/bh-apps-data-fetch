@@ -1,0 +1,170 @@
+name: Fetch — refresh the shared data
+
+# One workflow collects the public data that MIP (bh-app-medintel) and CPP (bh-app-pharmlands.360) both show, for every
+# asset in js/catalog.js, and commits it to main. GitHub Pages serves the repo, so both apps read the same files:
+#   https://do2blehelix.github.io/bh-apps-fetch/data/<name>.js    for <script src> (MIP)
+#   https://do2blehelix.github.io/bh-apps-fetch/data/<name>.json  for fetch() (CPP)
+# The repo is public, so GitHub-hosted runners cost no Actions minutes. The limits that remain are the sources' own:
+# GDELT allows one call every 5 seconds per IP address (runners share addresses, so some calls are refused), and the
+# Gemini free tier has a daily quota per model.
+#
+# What runs when (UTC):
+#   hourly at :05             news headlines (GDELT) and regulator newsrooms (FDA, EMA, MHRA); no LLM
+#   01:35 07:35 13:35 19:35   the full intel job: the above plus SEC filings, web search, and Gemini tagging and reading
+#   05:30 daily               regulatory data (EMA, Orange Book) and reported revenue (SEC XBRL); keeps the schedule alive
+#   06:20 every other day     catalog review (late in the Pacific day, on the Gemini quota the day has left)
+#   manual dispatch           choose what to run
+# After any of them, jobs/to-json.mjs writes the .json twins, and the run commits only when a file changed.
+#
+# Secrets (Settings > Secrets and variables > Actions):
+#   LLM_API_KEY        Gemini API key (aistudio.google.com), for tagging, reading and the catalog review    (optional)
+#   MIP_CONTACT_EMAIL  contact declared to the SEC and the polite pools; the SEC refuses calls without one  (optional)
+#   OPENFDA_API_KEY, NCBI_API_KEY, OPENALEX_API_KEY                                                  (optional)
+# Variable (optional): LLM_MODELS, a comma-separated Gemini model ladder instead of the one built from the key's list.
+#
+# Keep this workflow on schedule and manual triggers only. A pull_request trigger in a public repo is the usual way
+# secrets leak.
+on:
+  schedule:
+    - cron: "5 * * * *"            # hourly: news and regulator feeds
+    - cron: "35 1,7,13,19 * * *"   # every 6 hours: full intel
+    - cron: "30 5 * * *"           # daily: regulatory data and revenue
+    - cron: "20 6 */2 * *"         # every other day: catalog review
+  workflow_dispatch:
+    inputs:
+      run:
+        description: What to run
+        type: choice
+        default: news
+        options: [news, intel, regulatory, revenue, catalog, all, json]
+
+permissions:
+  contents: write   # commit the refreshed data
+  actions: write    # re-enable this workflow, so GitHub does not switch the schedule off after 60 quiet days
+
+# One run at a time (each commits to main); a run waits for the one before it rather than cancelling it.
+concurrency:
+  group: fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MIP_INTEL_NEWS_DUE_H: 12        # each asset's headlines are searched again after 12 hours
+      MIP_INTEL_NEWS_QUERIES: 24      # GDELT queries a run
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Decide what to run
+        id: plan
+        run: |
+          set -euo pipefail
+          news=false; intel=false; regulatory=false; revenue=false; catalog=false; catalog_force=false; keepalive=false
+          case "${{ github.event_name }}" in
+            schedule)
+              case "${{ github.event.schedule }}" in
+                "5 * * * *") news=true ;;
+                "35 1,7,13,19 * * *") intel=true ;;
+                "30 5 * * *") regulatory=true; revenue=true; keepalive=true ;;
+                "20 6 */2 * *") catalog=true ;;
+              esac ;;
+            workflow_dispatch)
+              case "${{ github.event.inputs.run }}" in
+                news) news=true ;;
+                intel) intel=true ;;
+                regulatory) regulatory=true ;;
+                revenue) revenue=true ;;
+                catalog) catalog=true; catalog_force=true ;;
+                all) intel=true; regulatory=true; revenue=true; catalog=true; catalog_force=true ;;
+                json) ;;
+              esac ;;
+          esac
+          for v in news intel regulatory revenue catalog catalog_force keepalive; do echo "$v=${!v}" >> "$GITHUB_OUTPUT"; done
+          echo "Plan: news=$news intel=$intel regulatory=$regulatory revenue=$revenue catalog=$catalog (event=${{ github.event_name }})"
+
+      # The jobs' disk cache, daily usage counters and llm-state.json (which Gemini models have used their day).
+      - name: Restore the jobs' cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.mip
+          key: fetch-home-${{ github.run_id }}
+          restore-keys: fetch-home-
+
+      # Headlines and regulator items only: no LLM, so it can run every hour. The full runs tag and read what it found.
+      - name: News and regulator feeds
+        if: steps.plan.outputs.news == 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+        run: node jobs/fetch-intel.mjs --only=news,feeds
+
+      - name: Intel (news, feeds, SEC filings, LLM tagging and reading)
+        if: steps.plan.outputs.intel == 'true'
+        continue-on-error: true
+        timeout-minutes: 25
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODELS: ${{ vars.LLM_MODELS }}
+          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+          MIP_INTEL_MAX_MIN: 12
+          MIP_INTEL_SEC_ASSETS: 80
+          MIP_INTEL_SEC_BACKFILL_DAYS: 90
+        run: node jobs/fetch-intel.mjs --force
+
+      # Its LLM use must not stack with the intel job's: it runs on its own schedule. Capped at 36 LLM calls and 15 minutes.
+      - name: Catalog review
+        if: steps.plan.outputs.catalog == 'true'
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODELS: ${{ vars.LLM_MODELS }}
+          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+          OPENFDA_API_KEY: ${{ secrets.OPENFDA_API_KEY }}
+        run: node jobs/review-catalog.mjs ${{ steps.plan.outputs.catalog_force == 'true' && '--force' || '' }}
+
+      - name: Regulatory data (EMA, Orange Book)
+        if: steps.plan.outputs.regulatory == 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: node jobs/fetch-regulatory.mjs
+
+      # Each filing is read once (ledger in data/revenue.js); a run reads at most 60 new ones. Needs MIP_CONTACT_EMAIL.
+      - name: Reported revenue (SEC XBRL)
+        if: steps.plan.outputs.revenue == 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          MIP_CONTACT_EMAIL: ${{ secrets.MIP_CONTACT_EMAIL }}
+        run: node jobs/fetch-revenue.mjs
+
+      - name: JSON twins
+        run: node jobs/to-json.mjs
+
+      - name: Commit refreshed data
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then echo "No data changes to commit."; exit 0; fi
+          git commit -m "data: refresh $(date -u +%FT%TZ)"
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && break
+            echo "push attempt $i failed, retrying"; sleep $((RANDOM % 5 + 2))
+          done
+
+      # GitHub switches off scheduled workflows in a public repo after 60 days without activity. Enabling it again
+      # once a day keeps it on.
+      - name: Keep the schedule alive
+        if: steps.plan.outputs.keepalive == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/fetch.yml/enable"
