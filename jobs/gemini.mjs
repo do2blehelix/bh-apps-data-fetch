@@ -3,12 +3,14 @@
 // Free-tier limits are per Google Cloud project and per model: requests per minute, tokens per minute and requests per
 // day, the daily count resetting at midnight Pacific time. So every call walks a ladder of models instead of leaning on
 // one: a model that answers 429 for the minute cools down for the retry delay the API sends and the call moves to the
-// next model; a model that has used its day (or has no free quota at all) is skipped until the Pacific date changes.
-// Only when every model is cooling does the call wait, and only when every model has used its day does it give up.
+// next model; a model that has used its day (or has no free quota at all) is skipped until the Pacific date changes;
+// a model that answers 503 (overloaded) is skipped for BUSY_MS. Only when every model is cooling does the call wait,
+// and only when every model has used its day does it give up.
 //
 // The ladder is built from the models the key can see (ListModels), best suited first, so newly released models join
-// on their own. LLM_MODELS=model-a,model-b overrides it. Google Search grounding is free only on some models
-// (LLM_SEARCH_MODELS, default gemini-2.5-flash and gemini-2.5-flash-lite); calls that need it use only those.
+// on their own. LLM_MODELS=model-a,model-b overrides it. Google Search grounding is free only on some models: calls
+// that need it try the stable Flash and Flash-Lite models on the ladder, newest first, or LLM_SEARCH_MODELS when set;
+// a model that refuses to search, or has used its search quota, is skipped for the day.
 //
 // Environment: LLM_API_KEY (or GEMINI_API_KEY), optional LLM_MODELS, LLM_SEARCH_MODELS, LLM_MIN_GAP_MS (default 4500,
 // the pause between two calls to the same model), LLM_API_BASE (for a local stand-in during tests).
@@ -21,6 +23,7 @@ const BASE = (process.env.LLM_API_BASE || 'https://generativelanguage.googleapis
 const STATE_FILE = path.join(HOME, 'llm-state.json');
 const MIN_GAP_MS = Number(process.env.LLM_MIN_GAP_MS) || 4500;
 const MAX_WAIT_MS = 65000;
+const BUSY_MS = 10 * 60000;   // an overloaded model (HTTP 503) usually stays so for minutes, not seconds
 const list = (s) => String(s || '').split(',').map((x) => x.trim().replace(/^models\//, '')).filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* The Pacific-time date: the day free-tier daily quotas belong to. */
@@ -103,8 +106,9 @@ export async function createGemini(opts = {}) {
   }
   g.ladders.extract = process.env.LLM_MODELS ? ids : rank(ids, 'extract');
   g.ladders.tag = process.env.LLM_MODELS ? ids : rank(ids, 'tag');
-  const wanted = list(process.env.LLM_SEARCH_MODELS || 'gemini-2.5-flash,gemini-2.5-flash-lite');
-  g.searchLadder = process.env.LLM_MODELS ? ids.filter((id) => wanted.includes(id)) : wanted.filter((id) => ids.includes(id));
+  const wanted = list(process.env.LLM_SEARCH_MODELS);
+  const flash = (id) => { const d = describe(id); return !!d && d.family === 'gemini' && !d.preview && (d.tier === 'flash' || d.tier === 'flash-lite'); };
+  g.searchLadder = !wanted.length ? g.ladders.extract.filter(flash) : process.env.LLM_MODELS ? ids.filter((id) => wanted.includes(id)) : wanted.filter((id) => ids.includes(id));
   g.available = g.ladders.extract.length > 0;
   if (!g.available) g.reason = 'The key sees no text models';
   log(`Gemini ladder (extract): ${g.ladders.extract.join(' > ') || 'none'}`);
@@ -122,13 +126,14 @@ export async function createGemini(opts = {}) {
   /* One call, walking the ladder. o: { profile, system, prompt, schema, search, maxOutputTokens, avoid, exclude }.
      avoid: models tried only after every other (a second opinion from a different model); exclude: models not used.
      Resolves to { text, data, model, grounding, finish }. Rejects with LlmError code 'quota' (every model spent),
-     'auth' (bad key), 'blocked' (the prompt was refused) or 'failed' (no model could answer this request). */
+     'auth' (bad key), 'blocked' (the prompt was refused), 'busy' (every model left is overloaded) or 'failed' (no model
+     could answer this request). */
   g.generate = async function (o) {
     const base = (o.search ? g.searchLadder : g.ladders[o.profile || 'extract'] || g.ladders.extract).filter((id) => !(o.exclude || []).includes(id));
     const ladder = base.filter((id) => !(o.avoid || []).includes(id)).concat(base.filter((id) => (o.avoid || []).includes(id)));
     if (!ladder.length) throw new LlmError('quota', o.search ? 'No model on the search ladder' : 'No models');
     const tried = new Map();
-    let lastErr = '';
+    let lastErr = '', busy = false;
     for (let round = 0; round < ladder.length * 3 + 4; round++) {
       const now = Date.now();
       const open = ladder.filter((id) => usable(id, o.search) && (tried.get(id) || 0) < 2);
@@ -137,7 +142,7 @@ export async function createGemini(opts = {}) {
       const id = open.find((x) => (ms(x).cooldown_until || 0) <= now);
       if (!id) {
         const wait = Math.min(...open.map((x) => ms(x).cooldown_until)) - now;
-        if (wait > MAX_WAIT_MS) { lastErr = 'every model is cooling down'; break; }
+        if (wait > MAX_WAIT_MS) { lastErr = 'every model is overloaded or cooling down'; busy = true; break; }
         await sleep(Math.max(250, wait)); continue;
       }
       const gap = (ms(id).last_at || 0) + MIN_GAP_MS - now;
@@ -186,13 +191,15 @@ export async function createGemini(opts = {}) {
         save(); throw new LlmError('auth', 'The API key was rejected: ' + msg);
       } else if (r.status === 403 || r.status === 404) {
         m.unusable_day = today(); log(`  ${id} not available to this key (${r.status}), skipped until tomorrow (Pacific)`);
+      } else if (r.status === 503) {
+        m.cooldown_until = Date.now() + BUSY_MS; log(`  ${id} overloaded (503), skipped for ${BUSY_MS / 60000} minutes`);
       } else {
         m.cooldown_until = Date.now() + 20000; log(`  ${id} HTTP ${r.status}, cooling 20 s`);
       }
     }
     save();
     const spent = !ladder.some((id) => usable(id, o.search));
-    throw new LlmError(spent ? 'quota' : 'failed', !spent ? 'No model answered: ' + lastErr : o.search ? 'No model with Google Search grounding is available to this key today (Pacific)' : 'Every model on the ladder has used its free quota, or is unavailable to this key, for today (Pacific)');
+    throw new LlmError(spent ? 'quota' : busy ? 'busy' : 'failed', !spent ? 'No model answered: ' + lastErr : o.search ? 'No model with Google Search grounding is available to this key today (Pacific)' : 'Every model on the ladder has used its free quota, or is unavailable to this key, for today (Pacific)');
   };
 
   /* Summary for data/intel.js and the Data sources page. */

@@ -41,7 +41,8 @@
 //
 // Each document is read once (the ledger in data/intel.js), so the daily LLM use is the new documents only. When
 // every model has used its free quota, the rest waits in the queue for the next run. MIP_INTEL_MAX_MIN (default 12)
-// caps the LLM time per run and MIP_INTEL_MAX_DOCS (default 30) the documents read per run.
+// caps the LLM time per run, counted from the first LLM task (after news, feeds and filings), and MIP_INTEL_MAX_DOCS
+// (default 30) the documents read per run.
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -76,7 +77,7 @@ const REG_KEEP_DAYS = 180, REG_CAP = 800, SEC_MAX_MIN = 4, TAG_BATCHES = 25, MAX
 const WEB_EVERY_DAYS = 7, HTA_EVERY_DAYS = 14, WEB_PER_RUN = 6, HTA_PER_RUN = 2, URLS_PER_SEARCH = 6;
 const EXCERPT_CHARS = 14000;
 
-const now = new Date(), t0 = Date.now(), deadline = t0 + MAX_MIN * 60000;
+const now = new Date(), t0 = Date.now();
 const isoDay = (d) => new Date(d).toISOString().slice(0, 10);
 const TODAY = isoDay(now);
 const daysAgo = (n) => isoDay(now.getTime() - n * 864e5);
@@ -396,14 +397,15 @@ const drugLine = (w) => `- ${w.asset}: ${w.name} (${w.terms.join(', ')}), develo
 const S = (t, extra) => Object.assign({ type: t }, extra || {});
 const strEnum = (list) => S('STRING', list.length ? { enum: list } : {});
 
-let llm = null, llmStop = null;
+let llm = null, llmStop = null, deadline = Infinity; // set when the LLM tasks start
 const outOfTime = () => Date.now() > deadline;
 async function ask(o) {
   if (llmStop) throw llmStop;
   try { return await llm.generate(o); }
   catch (e) {
-    // A spent search ladder only ends web search; a spent reading ladder or a rejected key ends all LLM work this run.
-    if (e instanceof LlmError && (e.code === 'auth' || (e.code === 'quota' && !o.search))) { llmStop = e; log(`llm       stopping: ${e.message}`); }
+    // A spent or overloaded search ladder only ends web search; a spent or overloaded reading ladder, or a rejected key,
+    // ends all LLM work this run, and the documents not read stay queued.
+    if (e instanceof LlmError && (e.code === 'auth' || ((e.code === 'quota' || e.code === 'busy') && !o.search))) { llmStop = e; log(`llm       stopping: ${e.message}`); }
     throw e;
   }
 }
@@ -433,6 +435,7 @@ async function runTag() {
 }
 
 /* 4b. Web search (Google Search grounding): the pages it cites become documents to read. */
+const NO_SEARCH = 'No model on the search ladder offers Google Search grounding to this key today (on the free tier only some Flash models do)';
 const SKIP_HOSTS = /(^|\.)(youtube\.com|wikipedia\.org|linkedin\.com|facebook\.com|x\.com|twitter\.com|reddit\.com|instagram\.com|tiktok\.com)$/i;
 async function resolveUrl(u) {
   if (!/grounding-api-redirect/.test(u)) return u;
@@ -460,7 +463,7 @@ async function runWeb(kind) {
   const every = kind === 'hta' ? HTA_EVERY_DAYS : WEB_EVERY_DAYS, per = kind === 'hta' ? HTA_PER_RUN : WEB_PER_RUN, book = runs[kind === 'hta' ? 'hta' : 'web'];
   // HTA decisions exist only for marketed products: assets with a US brand.
   const list = (kind === 'hta' ? WATCH.filter((w) => w.marketed) : WATCH).filter((w) => !book[w.asset] || book[w.asset] < daysAgo(every)).sort((a, b) => String(book[a.asset] || '').localeCompare(String(book[b.asset] || ''))).slice(0, per);
-  if (!llm.canRun('extract', true)) { status.web = Object.assign({}, status.web, { at: now.toISOString(), ok: false, error: llm.searchLadder.length ? 'Google Search grounding is not available to this key today (free tier: gemini-2.5-flash or flash-lite, access-limited)' : 'No model offering Google Search grounding is visible to this key' }); log(`web       ${status.web.error}`); return; }
+  if (!llm.canRun('extract', true)) { status.web = Object.assign({}, status.web, { at: now.toISOString(), ok: false, error: llm.searchLadder.length ? NO_SEARCH : 'No model offering Google Search grounding is visible to this key' }); log(`web       ${status.web.error}`); return; }
   let done = 0, added = 0, lastErr = null;
   for (const w of list) {
     if (llmStop || outOfTime() || !llm.canRun('extract', true)) break;
@@ -468,7 +471,7 @@ async function runWeb(kind) {
     catch (e) { lastErr = e.message; log(`${(kind === 'hta' ? 'hta' : 'web').padEnd(9)} ${w.asset.padEnd(16)} search failed: ${e.message}`); if (!llm.canRun('extract', true)) break; }
   }
   if (list.length && !done) { // every search failed: say why rather than report an empty success
-    status.web = { source: 'Google Search grounding (Gemini)', at: now.toISOString(), ok: false, error: llm.canRun('extract', true) ? lastErr : 'Google Search grounding is not available to this key today (free tier: gemini-2.5-flash or flash-lite, access-limited)' };
+    status.web = { source: 'Google Search grounding (Gemini)', at: now.toISOString(), ok: false, error: llm.canRun('extract', true) ? lastErr : NO_SEARCH };
     return;
   }
   const pw = status.web && status.web.ok ? status.web : {};
@@ -602,6 +605,7 @@ if (part('sec')) await runSec();
 llm = await createGemini({ log: (m) => log('llm       ' + m) });
 if (!llm.available) log(`llm       not used: ${llm.reason}. Documents stay queued until a key is set.`);
 if (llm.available) {
+  deadline = Date.now() + MAX_MIN * 60000;
   if (part('tag')) await runTag();
   if (part('web') && !llmStop) await runWeb('milestones');
   if (part('hta') && !llmStop) await runWeb('hta');

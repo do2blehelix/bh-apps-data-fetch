@@ -40,7 +40,7 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90   # above the sum of a manual "all" run's steps, so a slow step cannot stop the commit
     env:
       MIP_INTEL_NEWS_DUE_H: 12        # each asset's headlines are searched again after 12 hours
       MIP_INTEL_NEWS_QUERIES: 24      # GDELT queries a run
@@ -94,10 +94,12 @@ jobs:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
         run: node jobs/fetch-intel.mjs --only=news,feeds
 
+      # News (up to 6 minutes), SEC filings (up to 4), then the LLM (MIP_INTEL_MAX_MIN). A step stopped by its timeout
+      # writes nothing, so the timeout leaves room for the call in flight when the LLM cap is reached.
       - name: Intel (news, feeds, SEC filings, LLM tagging and reading)
         if: steps.plan.outputs.intel == 'true'
         continue-on-error: true
-        timeout-minutes: 25
+        timeout-minutes: 30
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODELS: ${{ vars.LLM_MODELS }}

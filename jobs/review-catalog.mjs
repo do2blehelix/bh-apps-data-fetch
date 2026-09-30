@@ -284,7 +284,7 @@ async function ask(o) {
   if (llmStop) throw llmStop;
   llmCalls++;
   try { return await llm.generate(Object.assign({ profile: 'extract', maxOutputTokens: 4096 }, o)); }
-  catch (e) { if (e instanceof LlmError && (e.code === 'auth' || (e.code === 'quota' && !o.soft))) { llmStop = e; log(`llm       stopping: ${e.message}`); } throw e; }
+  catch (e) { if (e instanceof LlmError && (e.code === 'auth' || ((e.code === 'quota' || e.code === 'busy') && !o.soft))) { llmStop = e; log(`llm       stopping: ${e.message}`); } throw e; }
 }
 const S = (t, extra) => Object.assign({ type: t }, extra || {});
 const itemsOf = (d, k) => (Array.isArray(d) ? d : d && d[k]) || [];
