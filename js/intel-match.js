@@ -3,10 +3,11 @@
    One file for jobs/fetch-intel.mjs (the scheduled job) and the browser (window.MIP_MATCH), so an asset is recognised
    the same way in a scheduled headline and in a live one.
      termsOf(a)      the names that identify a catalog asset in a text: US brand (and its first word when the brand has
-                     several, as headlines drop the device name), INN (not for a formulation whose molecule has other
-                     products, such as ruxolitinib cream), the catalog name and short name, development codes, and a code
-                     or coined name given in the name's parentheses. Terms of under four characters without a digit, and
-                     lists with commas, are left out.
+                     several, as headlines drop the device name), the product's other brand names (EU names, a second US
+                     brand), INN (not when the molecule has other products: a formulation such as ruxolitinib cream, or an
+                     entry marked inn: false, such as the dexamethasone implant), the catalog name and short name (unless
+                     either is that INN), development codes, and a code or coined name given in the name's parentheses.
+                     Terms of under four characters without a digit, and lists with commas, are left out.
      newsWordsOf(a)  the few words searched in GDELT: brand, INN (else the catalog name), one code of letters and digits
                      or a coined name (CagriSema). GDELT refuses short keywords and splits hyphenated ones.
      termRe(terms)   a whole-word, case-insensitive pattern for those names; hyphens and spaces in codes match either way
@@ -24,25 +25,31 @@
   function uniqCI(a) { var seen = {}; return a.filter(function (x) { var k = String(x || '').toLowerCase(); if (!x || seen[k]) return false; seen[k] = 1; return true; }); }
   function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
   var ROUTE_WORD = /^(topical|oral|injectable|intravenous|subcutaneous|intravitreal|inhaled|intranasal|PrEP)$/i;
+  var firstWord = function (b) { var w = b.split(/\s+/); return w.length > 1 && w[0].length >= 5 ? w[0] : null; };
   function parts(a) {
-    var brand = a.brand ? titleCase(a.brand) : null, bw = brand ? brand.split(/\s+/) : [];
-    return { brand: brand, first: bw.length > 1 && bw[0].length >= 5 ? bw[0] : null, base: a.name.replace(/\s*\([^)]*\)\s*$/, '').trim(), paren: ((a.name.match(/\(([^()]+)\)\s*$/) || [])[1] || '').trim() };
+    var brand = a.brand ? titleCase(a.brand) : null, more = (a.brands || []).map(titleCase);
+    return { brand: brand, first: brand ? firstWord(brand) : null, brands: more.concat(more.map(firstWord)), base: a.name.replace(/\s*\([^)]*\)\s*$/, '').trim(), paren: ((a.name.match(/\(([^()]+)\)\s*$/) || [])[1] || '').trim() };
   }
+  /* Whether a name is the bare molecule (the INN's first word) of an asset whose molecule has other products, so it does
+     not name the asset on its own. */
+  function bareInn(a) { var m = String(a.generic || '').toLowerCase().split(/\s+/)[0], on = !!(a.only || a.inn === false); return function (x) { return on && !!x && String(x).toLowerCase() === m; }; }
   function termsOf(a) {
-    var p = parts(a), t = [p.brand, p.first, a.only ? null : a.generic, p.base, a.short].concat(a.codes || []);
+    var p = parts(a), bare = bareInn(a), t = [p.brand, p.first].concat(p.brands, [a.only ? null : a.generic, p.base, a.short].filter(function (x) { return !bare(x); }), a.codes || []);
     if (p.paren && !/\s/.test(p.paren) && !ROUTE_WORD.test(p.paren) && (/\d/.test(p.paren) || /[a-z][A-Z]/.test(p.paren) || /^[A-Z][A-Z-]{3,}$/.test(p.paren))) t.push(p.paren);
     return uniqCI(t.filter(function (x) { return x && !/[,;]/.test(x) && (x.length >= 4 || /\d/.test(x)); }));
   }
   function newsWordsOf(a) {
-    var p = parts(a), ok = function (x) { return x && x.length >= 4 && !/[-/,+&().]/.test(x); };
+    var p = parts(a), bare = bareInn(a), ok = function (x) { return x && x.length >= 4 && !/[-/,+&().]/.test(x) && !bare(x); };
     var inn = [a.only ? p.base : a.generic, p.base, a.short].filter(ok)[0];
     var code = [a.short, p.paren].concat(a.codes || []).filter(function (c) { return c && /^[A-Za-z0-9]{5,}$/.test(c) && (/\d/.test(c) || /[a-z][A-Z]/.test(c)); })[0];
     return uniqCI([p.first || p.brand, inn, code].filter(ok)).slice(0, 3);
   }
   function termRe(terms) { return new RegExp('(?:^|[^a-z0-9])(?:' + terms.map(function (t) { return escRe(t).replace(/\\?[- ]/g, '[- ]?'); }).join('|') + ')(?![a-z0-9])', 'i'); }
 
-  /* Feed text: CDATA unwrapped, entities decoded, the HTML some feeds carry stripped, decoded again. */
-  function feedText(s) { var t = decode(String(s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')).replace(/<[^>]+>/g, ' '); return decode(t).replace(/\s+/g, ' ').trim(); }
+  /* Feed text: CDATA unwrapped, entities decoded, CDATA unwrapped again (some feeds escape it: &lt;![CDATA[…]]&gt;), the
+     HTML some feeds carry stripped, decoded again. */
+  var CDATA = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
+  function feedText(s) { var t = decode(String(s || '').replace(CDATA, '$1')).replace(CDATA, '$1').replace(/<[^>]+>/g, ' '); return decode(t).replace(/\s+/g, ' ').trim(); }
   function parseFeed(xml) {
     var out = [], re = /<(item|entry)\b[\s\S]*?<\/\1>/g, m;
     while ((m = re.exec(String(xml)))) {

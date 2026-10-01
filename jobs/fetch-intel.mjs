@@ -2,7 +2,7 @@
 // Intel job: competitor news, regulator newsrooms, company disclosures, and the details an LLM reads out of them.
 //   node jobs/fetch-intel.mjs                   run if the last run is older than MIP_INTEL_INTERVAL_MIN (default 360)
 //   node jobs/fetch-intel.mjs --force           run now
-//   node jobs/fetch-intel.mjs --only=news,sec   run some parts: news, feeds, sec, tag, web, hta, extract
+//   node jobs/fetch-intel.mjs --only=news,sec   run some parts: news, feeds, trade, sec, tag, web, hta, extract
 //
 // Writes data/intel.js (window.MIP_INTEL), which the app loads like data/snapshot.js.
 //
@@ -22,6 +22,9 @@
 //   feeds  Regulator newsrooms (FDA, EMA, MHRA; RSS and Atom): items whose title or summary names a catalog asset, or
 //          whose title names a catalog indication, kept REG_KEEP_DAYS with the title, date, link and the feed's own
 //          summary. Items that name an asset are read for milestones too.
+//   trade  Pharma trade-press feeds (RSS, data/intel-queries.js): items whose headline or summary names a catalog asset
+//          join the news headlines with their publication named. The summary is kept only until the item is labelled,
+//          since the labelling reads it where the headline names the company rather than the drug.
 //   sec    SEC EDGAR full-text search: 8-K and 6-K press releases (EX-99 exhibits) filed by each asset's own sponsor
 //          (the catalog's sponsor pattern on the filer name), each asset once a day, oldest first. The SEC requires a
 //          declared contact, so this part runs only when CONTACT_EMAIL is set.
@@ -54,7 +57,7 @@ import { createGemini, LlmError } from './gemini.mjs';
 
 const require = createRequire(import.meta.url);
 const CAT = require('../js/catalog.js');
-const { INTEL_FEEDS, INTEL_HTA_AGENCIES } = require('../data/intel-queries.js');
+const { INTEL_FEEDS, INTEL_TRADE_FEEDS = [], INTEL_HTA_AGENCIES } = require('../data/intel-queries.js');
 const { match } = require('../js/sources.js');
 const { decode, titleCase, termsOf, newsWordsOf, termRe, parseFeed } = require('../js/intel-match.js'); // shared with the browser
 
@@ -115,7 +118,7 @@ if (!FORCE && !ONLY.length && prev.generated_utc && now - new Date(prev.generate
   log(`Intel last ran ${prev.generated_utc}; next run due after ${INTERVAL_MIN} minutes. Nothing to do (--force to run now).`);
   process.exit(0);
 }
-const status = {}; ['news', 'feeds', 'sec', 'web'].forEach((k) => { status[k] = (prev.sources && prev.sources[k]) || null; });
+const status = {}; ['news', 'feeds', 'trade', 'sec', 'web'].forEach((k) => { status[k] = (prev.sources && prev.sources[k]) || null; });
 /* Per-asset bookkeeping: news_at (last answered GDELT query), news_solo (asked alone), news_skip (refused alone),
    sec_at (last EDGAR day), web and hta (last search day). */
 const runs = Object.assign({}, prev.runs || {});
@@ -289,7 +292,7 @@ async function runNews() {
 function pruneNews() {
   const per = {}, keep = [];
   for (const n of news.sort(byDateDesc)) {
-    delete n.seen_utc; if (n.tags) delete n.match;
+    delete n.seen_utc; if (n.tags) { delete n.match; delete n.summary; } // a trade-press summary served the labelling only
     if (n.date < daysAgo(NEWS_KEEP_DAYS)) continue;
     if (n.tags && !n.tags.relevant) { if (n.date >= daysAgo(NEWS_NOISE_DAYS)) keep.push(n); continue; }
     const as = n.tags ? n.tags.assets : n.match || [];
@@ -342,6 +345,38 @@ async function runFeeds() {
   }
   reg = reg.filter((r) => r.date >= daysAgo(REG_KEEP_DAYS)).sort(byDateDesc).slice(0, REG_CAP);
   status.feeds = { source: 'Regulator newsrooms (FDA, EMA, MHRA)', at: now.toISOString(), ok: failed < INTEL_FEEDS.length, feeds: INTEL_FEEDS.length, failed, added, kept: reg.length, by, error: failed ? lastErr : null };
+}
+
+/* =========================================================
+   2b. Trade press: pharma trade-press feeds (data/intel-queries.js), into the news headlines
+   ========================================================= */
+async function runTrade() {
+  const byId = new Map(news.map((n) => [n.id, n])), byUrl = new Map(news.map((n) => [n.url, n])), byTitle = new Map(news.map((n) => [norm(n.title), n])), by = {};
+  let added = 0, failed = 0, lastErr = null;
+  for (const f of INTEL_TRADE_FEEDS) {
+    let items;
+    try { items = parseFeed(await fetchFeed(f.url)); }
+    catch (e) { failed++; lastErr = `${f.name}: ${e.message}`; by[f.id] = { ok: false, error: clip(e.message, 160) }; log(`trade     ${f.id.padEnd(14)} ${e.message}`); continue; }
+    let matched = 0, fresh = 0;
+    for (const it of items) {
+      const title = it.title.slice(0, 300); if (!title || !it.link) continue;
+      // The headline first; the summary too, as business titles lead with the company ("Roche's MS pill").
+      const summary = clip(it.summary, 400), inTitle = WATCH.filter((w) => ASSET_RE[w.asset].test(title)).map((w) => w.asset);
+      const assets = inTitle.concat(WATCH.filter((w) => !inTitle.includes(w.asset) && ASSET_RE[w.asset].test(summary)).map((w) => w.asset));
+      if (!assets.length) continue;
+      matched++;
+      const id = 'tp:' + sha(it.link).slice(0, 16), nt = norm(title);
+      if (byId.has(id) || byUrl.has(it.link)) continue;
+      const twin = byTitle.get(nt); if (twin) { twin.also = (twin.also || 0) + 1; continue; } // the same story in a sister publication
+      let domain = ''; try { domain = new URL(it.link).hostname.replace(/^www\./, ''); } catch { /* no host */ }
+      const item = { id, title, url: it.link, domain, source: f.name, country: '', date: it.date || TODAY, match: assets, summary, tags: null };
+      news.push(item); byId.set(id, item); byUrl.set(it.link, item); byTitle.set(nt, item); added++; fresh++;
+    }
+    by[f.id] = { ok: true, items: items.length, matched, added: fresh };
+    log(`trade     ${f.id.padEnd(14)} ${items.length} items, ${matched} name a catalog asset, ${fresh} new`);
+  }
+  status.trade = { source: 'Trade press feeds', at: now.toISOString(), ok: failed < INTEL_TRADE_FEEDS.length, feeds: INTEL_TRADE_FEEDS.length, failed, added, kept: news.filter((n) => n.source).length, by, error: failed ? lastErr : null };
+  log(`trade     ${INTEL_TRADE_FEEDS.length - failed}/${INTEL_TRADE_FEEDS.length} feeds read, ${added} new headlines naming an asset${failed ? ' · ' + lastErr : ''}`);
 }
 
 /* =========================================================
@@ -418,11 +453,11 @@ async function runTag() {
     const batch = todo.slice(i, i + 40);
     const assets = Array.from(new Set(batch.flatMap((n) => n.match))), inds = indsFor(assets);
     const schema = S('OBJECT', { properties: { items: S('ARRAY', { items: S('OBJECT', { properties: { i: S('INTEGER'), relevant: S('BOOLEAN'), assets: S('ARRAY', { items: strEnum(assets) }), event: S('STRING', { enum: NEWS_KINDS }), indications: S('ARRAY', { items: strEnum(inds) }) }, required: ['i', 'relevant', 'assets', 'event', 'indications'] }) }) }, required: ['items'] });
-    const prompt = `Label each news headline below. For each, return i (its number), relevant (true only if the headline reports news about one of the listed drugs themselves: development, regulatory, clinical, safety, commercial or access news; false for market-research reports, stock tips, lists, or a passing mention), assets (the listed drugs the headline is about), event (the one kind of news it reports), and indications (from: ${inds.length ? inds.map((k) => `${k} = ${IND[k].name.toLowerCase()}`).join('; ') : 'none listed'}; empty if none is named).\n\nDrugs:\n${assets.map((a) => drugLine(W[a])).join('\n')}\n\nHeadlines:\n${batch.map((n, k) => `${k}. ${n.title} (${n.domain}, ${n.date})`).join('\n')}\n\nReturn JSON: {"items": [{"i": 0, "relevant": true, "assets": ["..."], "event": "...", "indications": ["..."]}]}`;
-    let r; try { r = await ask({ profile: 'tag', system: 'You label pharmaceutical news headlines for a medical affairs team. Judge only from the headline text. Return JSON only.', prompt, schema, maxOutputTokens: 8192 }); } catch (e) { log(`tag       batch failed: ${e.message}`); continue; }
+    const prompt = `Label each news headline below. For each, return i (its number), relevant (true only if the headline, read with its summary where one is given, reports news about one of the listed drugs themselves: development, regulatory, clinical, safety, commercial or access news; false for market-research reports, stock tips, lists, or a passing mention), assets (the listed drugs the headline is about), event (the one kind of news it reports), and indications (from: ${inds.length ? inds.map((k) => `${k} = ${IND[k].name.toLowerCase()}`).join('; ') : 'none listed'}; empty if none is named).\n\nDrugs:\n${assets.map((a) => drugLine(W[a])).join('\n')}\n\nHeadlines:\n${batch.map((n, k) => `${k}. ${n.title}${n.summary ? ' [summary: ' + clip(n.summary, 240) + ']' : ''} (${n.source || n.domain}, ${n.date})`).join('\n')}\n\nReturn JSON: {"items": [{"i": 0, "relevant": true, "assets": ["..."], "event": "...", "indications": ["..."]}]}`;
+    let r; try { r = await ask({ profile: 'tag', system: 'You label pharmaceutical news headlines for a medical affairs team. Judge only from the headline text, and its summary where one is given. Return JSON only.', prompt, schema, maxOutputTokens: 8192 }); } catch (e) { log(`tag       batch failed: ${e.message}`); continue; }
     for (const x of (Array.isArray(r.data) ? r.data : r.data && r.data.items) || []) {
       const n = batch[x.i]; if (!n || n.tags) continue;
-      // An asset label stands only if the headline names that asset.
+      // An asset label stands only if the headline (or, for a trade-press item, its summary) names that asset.
       const named = (x.assets || []).filter((a) => n.match.includes(a));
       const rel = !!x.relevant && (named.length || n.match.length) > 0;
       n.tags = { relevant: rel, assets: rel ? (named.length ? named : n.match) : [], event: NEWS_KINDS.includes(x.event) ? x.event : 'Other', ind: (x.indications || []).filter((k) => inds.includes(k)), model: r.model };
@@ -431,7 +466,7 @@ async function runTag() {
   }
   log(`tag       ${done} of ${todo.length} new headlines labelled`);
   // Headlines that report a milestone: read the article too.
-  for (const n of news) if (n.tags && n.tags.relevant && MILESTONE_NEWS.has(n.tags.event)) enqueue({ id: 'news:' + n.id, kind: 'news', task: 'milestones', url: n.url, date: n.date, publisher: n.domain, title: n.title, assets: n.tags.assets });
+  for (const n of news) if (n.tags && n.tags.relevant && MILESTONE_NEWS.has(n.tags.event)) enqueue({ id: 'news:' + n.id, kind: 'news', task: 'milestones', url: n.url, date: n.date, publisher: n.source || n.domain, title: n.title, assets: n.tags.assets });
 }
 
 /* 4b. Web search (Google Search grounding): the pages it cites become documents to read. */
@@ -601,6 +636,7 @@ function consolidateHta(list) {
    ========================================================= */
 if (part('news')) await runNews();
 if (part('feeds')) await runFeeds();
+if (part('trade')) await runTrade();
 if (part('sec')) await runSec();
 llm = await createGemini({ log: (m) => log('llm       ' + m) });
 if (!llm.available) log(`llm       not used: ${llm.reason}. Documents stay queued until a key is set.`);
@@ -633,13 +669,14 @@ const payload = {
   notes: [
     'Scope: every asset and indication of every therapeutic area in js/catalog.js; the app shows each watchlist the records about its own assets and indications. Indication ids are those of the catalog\'s areas merged (CAT.indsFromAll maps them to a watchlist\'s).',
     'News: GDELT DOC 2.0 (gdeltproject.org), English-language articles whose headline names a catalog asset; headlines and links only, at most ' + NEWS_PER_ASSET + ' per asset over ' + NEWS_KEEP_DAYS + ' days.',
+    'Trade press: items from pharma trade-press RSS feeds (' + INTEL_TRADE_FEEDS.map((f) => f.name).join(', ') + ') whose headline or summary names a catalog asset; headline, link and publication (source) only, in the same list as the news.',
     'Regulator news: FDA, EMA and MHRA newsroom feeds (RSS and Atom), items that name a catalog asset or, in the title, a catalog indication; title, date, link and the feed\'s own summary.',
     'Filings: SEC EDGAR full-text search, 8-K and 6-K press-release exhibits filed by each asset\'s sponsor.',
     'Milestones and HTA decisions: read out of those documents by an LLM (Gemini). Each row carries a sentence copied from its source, checked against the fetched text; rows whose sentence, asset, indication or date did not check out were dropped.',
     'Labels on headlines (event kind, indication) are the model\'s reading of the headline alone.'
   ]
 };
-const header = `/* Competitor news, regulator newsrooms, company filings and the milestones read out of them, generated by jobs/fetch-intel.mjs on ${payload.generated_utc}.\n   Sources: GDELT, FDA, EMA and MHRA feeds, SEC EDGAR, pages cited by Google Search; extraction by the Gemini API. Do not edit by hand: rerun the script. */\n`;
+const header = `/* Competitor news, regulator newsrooms, company filings and the milestones read out of them, generated by jobs/fetch-intel.mjs on ${payload.generated_utc}.\n   Sources: GDELT, pharma trade-press feeds, FDA, EMA and MHRA feeds, SEC EDGAR, pages cited by Google Search; extraction by the Gemini API. Do not edit by hand: rerun the script. */\n`;
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT + '.tmp', header + 'window.MIP_INTEL = ' + JSON.stringify(payload) + ';\n');
 fs.renameSync(OUT + '.tmp', OUT);

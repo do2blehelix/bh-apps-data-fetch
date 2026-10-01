@@ -3,7 +3,7 @@ name: Fetch
 # Collects public data for every asset in js/catalog.js and commits it to data/. Each file is also written as .json.
 #
 # When (UTC):
-#   hourly at :05             news headlines and regulator newsrooms; no LLM
+#   hourly at :05             news headlines, regulator newsrooms and trade-press feeds; no LLM
 #   01:35 07:35 13:35 19:35   the full intel job: the above plus SEC filings, web search, LLM tagging and reading
 #   05:30 daily               regulatory data and reported revenue; re-enables this workflow so the schedule stays on
 #   06:20 every other day     catalog review
@@ -16,7 +16,7 @@ name: Fetch
 # Keep this workflow on schedule and manual triggers only: a pull_request trigger in a public repo can leak secrets.
 on:
   schedule:
-    - cron: "5 * * * *"            # hourly: news and regulator feeds
+    - cron: "5 * * * *"            # hourly: news, regulator and trade-press feeds
     - cron: "35 1,7,13,19 * * *"   # every 6 hours: full intel
     - cron: "30 5 * * *"           # daily: regulatory data and revenue
     - cron: "20 6 */2 * *"         # every other day: catalog review
@@ -85,14 +85,15 @@ jobs:
           key: fetch-home-${{ github.run_id }}
           restore-keys: fetch-home-
 
-      # Headlines and regulator items only: no LLM, so it can run every hour. The full runs tag and read what it found.
-      - name: News and regulator feeds
+      # Headlines, regulator items and trade-press items only: no LLM, so it can run every hour. The full runs tag and
+      # read what it found. Most trade-press feeds hold only one to three days of items.
+      - name: News, regulator and trade-press feeds
         if: steps.plan.outputs.news == 'true'
         continue-on-error: true
         timeout-minutes: 15
         env:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
-        run: node jobs/fetch-intel.mjs --only=news,feeds
+        run: node jobs/fetch-intel.mjs --only=news,feeds,trade
 
       # News (up to 6 minutes), SEC filings (up to 4), then the LLM (MIP_INTEL_MAX_MIN). A step stopped by its timeout
       # writes nothing, so the timeout leaves room for the call in flight when the LLM cap is reached.
