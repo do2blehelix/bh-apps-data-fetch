@@ -21,6 +21,14 @@
      guides  [name, Europe PMC term, URL, regions]      congresses [abbr, name, URL]
      advocacy [name, kind, indication ids or ['*'], URL] themes / gaps [key?, label, Europe PMC query]
      endpoints / elig [pattern, label]                   pops [key, label, Europe PMC query, PubMed query]
+
+   Country or region: { id, name, short, members, regions, natGuides, ctgov, aff, regulator, labelNote, hta, safety, price }
+     members    a region's countries; its ctgov, aff, regions, natGuides, hta and safety are filled from theirs
+     regions    the guide regions that apply (guides' fourth element: a country code, 'EU' or '*')
+     natGuides  [name, Europe PMC term, URL] national guideline bodies for every area
+     ctgov      ClinicalTrials.gov LocationCountry values      aff  Europe PMC affiliation clause
+     hta / safety  [name, URL] the bodies that count: a URL ending in '=' takes the INN as a search, any other URL is the
+                site, null when there is no site to link       price  the price basis
    ========================================================= */
 (function (root) {
   'use strict';
@@ -1739,6 +1747,48 @@
   };
   var ROUTES = ['Oral', 'Injectable', 'Intravenous', 'Topical', 'Inhaled', 'Intranasal', 'Intravitreal', 'Ophthalmic', 'Intrathecal', 'Vaginal', 'Transdermal', 'Other'];
 
+  /* Countries and regions, in the order they are offered. 'ALL' is every country. */
+  var EMA_PRAC = ['EMA PRAC', 'https://www.ema.europa.eu/en/search?search_api_fulltext='];
+  var COUNTRY_LIST = [
+    { id: 'US', regions: ['US'], name: 'United States', short: 'USA', ctgov: ['United States'], aff: '(AFF:"United States" OR AFF:USA)', regulator: 'FDA', labelNote: 'US prescribing information from openFDA (SPL), refreshed daily by FDA', price: 'WAC, ASP and NADAC',
+      hta: [['ICER', 'https://icer.org/?s='], ['CMS Coverage (MCD)', 'https://www.cms.gov/medicare-coverage-database/search.aspx?q='], ['AMCP Format resources', 'https://www.amcp.org/search?keys=']],
+      safety: [['FDA Drug Safety Communications', 'https://www.fda.gov/drugs/drug-safety-and-availability/drug-safety-communications'], ['FDA MedWatch', 'https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program']] },
+    { id: 'CA', regions: ['CA'], name: 'Canada', short: 'Canada', ctgov: ['Canada'], aff: 'AFF:Canada', regulator: 'Health Canada', labelNote: 'Canadian product monographs: Health Canada Drug Product Database (web)', price: 'provincial formulary price',
+      hta: [['CDA-AMC', 'https://www.cda-amc.ca/search?keys='], ['INESSS', 'https://www.inesss.qc.ca/en/search.html?q=']],
+      safety: [['Health Canada recalls and safety alerts', 'https://recalls-rappels.canada.ca/en/search/site?search_api_fulltext='], ['Health Canada DPD', 'https://health-products.canada.ca/dpd-bdpp/']] },
+    { id: 'EU5', members: ['DE', 'FR', 'IT', 'ES', 'GB'], regions: ['EU'], name: 'EU5 (Germany, France, Italy, Spain, UK)', short: 'EU5', regulator: 'EMA / MHRA', labelNote: 'EU SmPC: EMA product pages (EPAR); UK SmPC and PIL: MHRA Products (web) and the emc', price: 'national list prices' },
+    { id: 'GB', regions: ['GB', 'EU'], natGuides: [['NICE', '(NICE OR "National Institute for Health and Care Excellence")', 'https://www.nice.org.uk/guidance']], name: 'United Kingdom', short: 'UK', ctgov: ['United Kingdom'], aff: '(AFF:"United Kingdom" OR AFF:UK OR AFF:England OR AFF:Scotland OR AFF:Wales)', regulator: 'MHRA', labelNote: 'UK SmPC and PIL: MHRA Products (web) and the emc', price: 'BNF list price',
+      hta: [['NICE', 'https://www.nice.org.uk/search?q='], ['SMC', 'https://scottishmedicines.org.uk/search/?q='], ['AWTTC', 'https://awttc.nhs.wales/search/?q=']],
+      safety: [['MHRA Drug Safety Update', 'https://www.gov.uk/drug-safety-update?keywords='], ['Yellow Card iDAPs', 'https://yellowcard.mhra.gov.uk/idaps']] },
+    { id: 'DE', regions: ['DE', 'EU'], natGuides: [['AWMF', '(AWMF OR S3-Leitlinie)', 'https://register.awmf.org/de/leitlinien/aktuelle-leitlinien']], name: 'Germany', short: 'Germany', ctgov: ['Germany'], aff: 'AFF:Germany', regulator: 'EMA / BfArM', labelNote: 'EU SmPC: EMA product pages (EPAR); German Fachinformation via BfArM', price: 'AMNOG price',
+      hta: [['G-BA', 'https://www.g-ba.de/suche/?q='], ['IQWiG', 'https://www.iqwig.de/en/search/?q=']],
+      safety: [EMA_PRAC, ['BfArM Risikoinformationen', 'https://www.bfarm.de/SiteGlobals/Forms/Suche/Servicesuche_Formular.html?input_=']] },
+    { id: 'FR', regions: ['FR', 'EU'], natGuides: [['HAS', '("Haute Autorité de Santé")', 'https://www.has-sante.fr/']], name: 'France', short: 'France', ctgov: ['France'], aff: 'AFF:France', regulator: 'EMA / ANSM', labelNote: 'EU SmPC: EMA product pages (EPAR); RCP via base de données publique des médicaments', price: 'published price',
+      hta: [['HAS', 'https://www.has-sante.fr/jcms/fc_2875171/fr/rechercher-une-recommandation-un-avis?text=']],
+      safety: [EMA_PRAC, ['ANSM', 'https://ansm.sante.fr/recherche?q=']] },
+    { id: 'IT', regions: ['IT', 'EU'], name: 'Italy', short: 'Italy', ctgov: ['Italy'], aff: 'AFF:Italy', regulator: 'EMA / AIFA', labelNote: 'EU SmPC: EMA product pages (EPAR); RCP via AIFA', price: 'AIFA negotiated price',
+      hta: [['AIFA', 'https://www.aifa.gov.it/ricerca?q=']],
+      safety: [EMA_PRAC, ['AIFA', 'https://www.aifa.gov.it/ricerca?q=']] },
+    { id: 'ES', regions: ['ES', 'EU'], name: 'Spain', short: 'Spain', ctgov: ['Spain'], aff: 'AFF:Spain', regulator: 'EMA / AEMPS', labelNote: 'EU SmPC: EMA product pages (EPAR); ficha técnica via CIMA', price: 'CIPM price (Nomenclátor)',
+      hta: [['AEMPS / IPT', 'https://www.aemps.gob.es/?s='], ['CIMA', 'https://cima.aemps.es/cima/publico/lista.html']],
+      safety: [EMA_PRAC, ['AEMPS', 'https://www.aemps.gob.es/?s=']] },
+    { id: 'JP', regions: ['JP'], name: 'Japan', short: 'Japan', ctgov: ['Japan'], aff: 'AFF:Japan', regulator: 'PMDA', labelNote: 'Japanese package inserts: PMDA (web)', price: 'NHI price',
+      hta: [['C2H (cost-effectiveness evaluation)', 'https://c2h.niph.go.jp/en/']],
+      safety: [['PMDA safety information', 'https://www.pmda.go.jp/english/safety/info-services/drugs/0001.html']] },
+    { id: 'CN', regions: ['CN'], name: 'China', short: 'China', ctgov: ['China'], aff: 'AFF:China', regulator: 'NMPA', labelNote: 'Chinese package inserts: NMPA databases (web)', price: 'NRDL price',
+      hta: [['NHSA (NRDL)', 'https://www.nhsa.gov.cn/']],
+      safety: [['CDR drug safety warnings', 'https://www.cdr-adr.org.cn/drug_1/aqjs_1/'], ['NMPA news', 'https://english.nmpa.gov.cn/news.html']] },
+    { id: 'AU', regions: ['AU'], name: 'Australia', short: 'Australia', ctgov: ['Australia'], aff: 'AFF:Australia', regulator: 'TGA', labelNote: 'Australian PI and CMI: TGA eBS (web)', price: 'PBS price',
+      hta: [['PBAC', 'https://www.pbs.gov.au/pbs/search?term=']],
+      safety: [['TGA safety alerts', 'https://www.tga.gov.au/search?query='], ['TGA DAEN', 'https://daen.tga.gov.au/']] },
+    { id: 'EG', regions: ['EG'], name: 'Egypt', short: 'Egypt', ctgov: ['Egypt'], aff: 'AFF:Egypt', regulator: 'EDA', labelNote: 'Egyptian registrations: EDA registered-drug search by trade or generic name (web)', price: 'EDA price (external reference pricing)',
+      hta: [['UPA', null], ['UHIA', 'https://uhia.gov.eg/']],
+      safety: [['EDA recalls and alerts', 'https://www.edaegypt.gov.eg/en/awareness/recalls-alerts-and-awareness-letters/'], ['EDA pharmacovigilance publications', 'https://www.edaegypt.gov.eg/en/awareness/ca-of-pharmaceutical-care-publications/pharmacovigilance-publications/']] },
+    { id: 'ALL', regions: ['*'], name: 'All countries', short: 'Global', ctgov: [], aff: null, regulator: 'All regulators', labelNote: 'US prescribing information from openFDA; other jurisdictions through their agency links', price: 'US list price as the reference',
+      hta: [['NICE', 'https://www.nice.org.uk/search?q='], ['CDA-AMC', 'https://www.cda-amc.ca/search?keys='], ['G-BA', 'https://www.g-ba.de/suche/?q='], ['HAS', 'https://www.has-sante.fr/jcms/fc_2875171/fr/rechercher-une-recommandation-un-avis?text='], ['PBAC', 'https://www.pbs.gov.au/pbs/search?term='], ['ICER', 'https://icer.org/?s=']],
+      safety: [['FDA Drug Safety Communications', 'https://www.fda.gov/drugs/drug-safety-and-availability/drug-safety-communications'], EMA_PRAC, ['MHRA Drug Safety Update', 'https://www.gov.uk/drug-safety-update?keywords=']] }
+  ];
+
   /* ---------- Helpers ---------- */
   function qt(s) { s = String(s); return /[\s\-\/+,&]/.test(s) ? '"' + s.replace(/"/g, '') + '"' : s; }
   function uniq(a) { var o = [], seen = {}; a.forEach(function (x) { if (x && !seen[x]) { seen[x] = 1; o.push(x); } }); return o; }
@@ -1832,6 +1882,19 @@
     ids.forEach(function (a) { Object.keys(all[a] || {}).forEach(function (k) { if (own[a] && own[a][k]) out[all[a][k]] = own[a][k]; }); });
     return out;
   }
+  /* A region's lists, filled from its member countries (each body once). */
+  function country(c) {
+    if (!c.members) return c;
+    var ms = c.members.map(function (id) { return COUNTRY_LIST.filter(function (x) { return x.id === id; })[0]; });
+    function all(k) { return [].concat.apply([], ms.map(function (m) { return m[k] || []; })); }
+    function once(list) { var seen = {}; return list.filter(function (x) { return seen[x[0]] ? false : (seen[x[0]] = 1); }); }
+    var o = copy(c);
+    o.ctgov = uniq(all('ctgov')); o.regions = uniq((c.regions || []).concat(all('regions')));
+    o.aff = '(' + ms.map(function (m) { return m.aff; }).join(' OR ') + ')';
+    o.natGuides = once(all('natGuides')); o.hta = once(all('hta')); o.safety = once(all('safety'));
+    return o;
+  }
+  var COUNTRIES = COUNTRY_LIST.map(country);
   /* Core and watch set from the products of interest. With products: their indications are core; the other indications
      where an asset competing in a core indication also plays are watch; so are the key indications of an area added
      without a product; the rest are off. Without products: each area's key indications are core and the rest watch. */
@@ -1924,6 +1987,6 @@
   var updates = { generated_utc: (UPD && UPD.generated_utc) || null, total: UPD && UPD.changes ? UPD.changes.length : 0 };
   var res = applyUpdates(UPD && UPD.changes); updates.applied = res.applied; updates.skipped = res.skipped;
 
-  var api = { TAS: TAS, GENERIC: GENERIC, ROUTES: ROUTES, ta: ta, asset: asset, defaultWatch: defaultWatch, state: state, merge: merge, resolve: resolve, tasOf: tasOf, areasOf: areasOf, allIds: allIds, indsFromAll: indsFromAll, configs: configs, gapRows: gapRows, titleAbs: titleAbs, applyUpdates: applyUpdates, updates: updates };
+  var api = { TAS: TAS, GENERIC: GENERIC, ROUTES: ROUTES, COUNTRIES: COUNTRIES, ta: ta, asset: asset, defaultWatch: defaultWatch, state: state, merge: merge, resolve: resolve, tasOf: tasOf, areasOf: areasOf, allIds: allIds, indsFromAll: indsFromAll, configs: configs, gapRows: gapRows, titleAbs: titleAbs, applyUpdates: applyUpdates, updates: updates };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.MIP_CATALOG = api;
 })(this);
