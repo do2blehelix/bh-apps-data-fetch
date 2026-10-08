@@ -95,7 +95,7 @@ const ALL = CAT.merge(CAT.allIds());
 const IND = Object.fromEntries(ALL.inds.map((i) => [i.id, i]));
 const WATCH = ALL.assets.map((x) => CAT.asset(x)).map((a) => ({
   asset: a.id, name: a.name + (a.brand ? ' (' + titleCase(a.brand) + ')' : ''), company: a.company || '', terms: termsOf(a), news: newsWordsOf(a),
-  sponsor: a.sponsor && a.sponsor !== '.' ? a.sponsor : null, inds: a.inds || [], marketed: !!a.brand
+  sponsor: a.sponsor && a.sponsor !== '.' ? a.sponsor : null, inds: a.inds || [], marketed: !!a.brand, ext: !!a.ext
 })).filter((w) => w.terms.length);
 const W = Object.fromEntries(WATCH.map((w) => [w.asset, w]));
 const ASSET_RE = Object.fromEntries(WATCH.map((w) => [w.asset, termRe(w.terms)]));
@@ -229,7 +229,7 @@ async function gdelt(url) {
    search words per query; an asset marked solo gets a query of its own. */
 function newsPlan() {
   const due = WATCH.filter((w) => w.news.length && !(runs.news_skip[w.asset] >= daysAgo(NEWS_SKIP_DAYS)) && (!runs.news_at[w.asset] || now - Date.parse(runs.news_at[w.asset]) > NEWS_DUE_H * 3600e3))
-    .sort((a, b) => String(runs.news_at[a.asset] || '').localeCompare(String(runs.news_at[b.asset] || '')));
+    .sort((a, b) => (a.ext ? 1 : 0) - (b.ext ? 1 : 0) || String(runs.news_at[a.asset] || '').localeCompare(String(runs.news_at[b.asset] || '')));
   const groups = []; let cur = null, words = 0;
   for (const w of due) {
     if (runs.news_solo[w.asset]) { groups.push([w]); continue; }
@@ -385,7 +385,7 @@ async function runTrade() {
 const cleanCo = (s) => String(s || '').replace(/\s*\(CIK[^)]*\)\s*$/, '').replace(/\s*\([A-Z0-9.\-, ]+\)\s*$/, '').trim();
 async function runSec() {
   if (!CONTACT) { status.sec = { source: 'SEC EDGAR full-text search', at: now.toISOString(), ok: false, error: 'Skipped: the SEC requires a declared contact. Set CONTACT_EMAIL.' }; log('sec       skipped: set CONTACT_EMAIL (the SEC requires a declared contact)'); return; }
-  const all = WATCH.filter((w) => w.sponsor), list = all.filter((w) => runs.sec_at[w.asset] !== TODAY).sort((a, b) => String(runs.sec_at[a.asset] || '').localeCompare(String(runs.sec_at[b.asset] || ''))).slice(0, SEC_ASSETS);
+  const all = WATCH.filter((w) => w.sponsor), list = all.filter((w) => runs.sec_at[w.asset] !== TODAY).sort((a, b) => (a.ext ? 1 : 0) - (b.ext ? 1 : 0) || String(runs.sec_at[a.asset] || '').localeCompare(String(runs.sec_at[b.asset] || ''))).slice(0, SEC_ASSETS);
   const stopAt = Date.now() + SEC_MAX_MIN * 60000;
   let found = 0, added = 0, failed = 0, done = 0, lastErr = null;
   for (const w of list) {
@@ -497,7 +497,7 @@ async function webSearch(kind, w) {
 async function runWeb(kind) {
   const every = kind === 'hta' ? HTA_EVERY_DAYS : WEB_EVERY_DAYS, per = kind === 'hta' ? HTA_PER_RUN : WEB_PER_RUN, book = runs[kind === 'hta' ? 'hta' : 'web'];
   // HTA decisions exist only for marketed products: assets with a US brand.
-  const list = (kind === 'hta' ? WATCH.filter((w) => w.marketed) : WATCH).filter((w) => !book[w.asset] || book[w.asset] < daysAgo(every)).sort((a, b) => String(book[a.asset] || '').localeCompare(String(book[b.asset] || ''))).slice(0, per);
+  const list = (kind === 'hta' ? WATCH.filter((w) => w.marketed) : WATCH).filter((w) => !book[w.asset] || book[w.asset] < daysAgo(every)).sort((a, b) => (a.ext ? 1 : 0) - (b.ext ? 1 : 0) || String(book[a.asset] || '').localeCompare(String(book[b.asset] || ''))).slice(0, per);
   if (!llm.canRun('extract', true)) { status.web = Object.assign({}, status.web, { at: now.toISOString(), ok: false, error: llm.searchLadder.length ? NO_SEARCH : 'No model offering Google Search grounding is visible to this key' }); log(`web       ${status.web.error}`); return; }
   let done = 0, added = 0, lastErr = null;
   for (const w of list) {

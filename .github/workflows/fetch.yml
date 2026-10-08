@@ -128,6 +128,14 @@ jobs:
         timeout-minutes: 15
         run: node jobs/fetch-regulatory.mjs
 
+      # Markets by country (Canada, France, Spain, UK, Japan, Australia, EU): needs the regulatory file above. Canada and Spain
+      # are checked per asset, 600 a run, each asset again after 14 days; Australia waits 20 seconds between PBS calls.
+      - name: Markets by country
+        if: steps.plan.outputs.regulatory == 'true'
+        continue-on-error: true
+        timeout-minutes: 40
+        run: node jobs/fetch-markets.mjs --limit=600
+
       # Each filing is read once (ledger in data/revenue.js); a run reads at most 60 new ones. Needs CONTACT_EMAIL.
       - name: Reported revenue (SEC XBRL)
         if: steps.plan.outputs.revenue == 'true'

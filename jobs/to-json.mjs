@@ -14,6 +14,7 @@ const FILES = [
   { name: 'intel', global: 'MIP_INTEL', drop: ['docs', 'pending', 'runs'] },
   { name: 'regulatory', global: 'MIP_REGULATORY', drop: [] },
   { name: 'revenue', global: 'MIP_REVENUE', drop: ['ledger'] },
+  { name: 'markets', global: 'MIP_MARKETS', drop: [] },
   { name: 'catalog-updates', global: 'MIP_CATALOG_UPDATES', drop: [] }
 ];
 
